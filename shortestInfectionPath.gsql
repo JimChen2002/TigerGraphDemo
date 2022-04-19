@@ -1,0 +1,194 @@
+CREATE QUERY shortestInfectionPath(vertex<Patient> S, vertex<Patient> T) FOR GRAPH MyGraph SYNTAX V2 { 
+  /**********************************************************
+   * This query takes a pair of patients and finds the shortest (potential) infections path among them
+   * There are 3 types of (potential) infections that we consider:
+   * 1. infected_by edges which indicates infection relationship with probability 0.99
+   * 2. close contact within infectious timeframe which indicates infection relationship with probability 0.6
+   * 3. same non-trivial infection case which indicates infection relationship with probability 0.2
+   * 
+   * Sample Parameter: patient 4100000006, patient 1000000234, 3001000002 (6023000034 for unreachable)
+   * Small Sample: patient 4100000008, patient 1000000231
+   *********************************************************/
+  
+  // Part 1: Crawl all infected patients from S through infected_by edges, travel events and infection cases
+  // Adapted from edgeCrawl query
+  TYPEDEF TUPLE<cost FLOAT, length INT, pred VERTEX> min_tup;
+  
+  DATETIME STARTTIME, ENDTIME;
+  OrAccum @visited;
+  SetAccum<EDGE> @@edgeSet;
+  MinAccum<float> @score = 100;
+  STARTTIME = S.symptom_onset_date; // to_datetime("2020-02-22 00:00:00"); 
+  ENDTIME = S.released_date; // to_datetime("2020-03-22 00:00:00");
+
+  HeapAccum<min_tup>(1, cost ASC, length ASC) @min_path_heap;
+  MinAccum<FLOAT> @min_prev_min_path = -1;
+  ListAccum<VERTEX> @path_list;
+
+  OrAccum @or_is_candidate = FALSE;
+  FLOAT epsilon = 0.001;
+  // Could switch to user input
+  FLOAT infected_by_weight = -log(0.99);
+  FLOAT close_contact_weight = -log(sqrt(0.6));
+  FLOAT same_case_weight = -log(sqrt(0.2));
+  
+  Infected (ANY) = {S};
+  Infected = select s from Infected:s
+             accum s.@visited = true,
+                   s.@score = 0.99;
+
+  AllVertexes = Infected;
+  
+  while Infected.size() > 0 limit 100 do
+    // Case 1: Infected by
+    People = select t from Infected:s-(reverse_INFECTED_BY>:e)-:t
+             where (STARTTIME <= t.symptom_onset_date and ENDTIME >= t.symptom_onset_date)
+               and t.@visited == false
+             accum t.@visited = true,
+                   @@edgeSet += e;
+
+    // Case 2: Close contact
+    Places = select t from Infected:s-(PATIENT_TRAVELED:e)-TravelEvent:t
+             where (t.visited_date >= STARTTIME and 
+                    t.visited_date <= ENDTIME and 
+                    t.outdegree("PATIENT_TRAVELED") > 1)
+               and t.@visited == false
+             accum t.@visited = true,
+                   @@edgeSet += e; 
+  
+    SamePlace = select t from Places:s-(PATIENT_TRAVELED:e)-Patient:t
+                where t.@visited == false 
+                accum t.@visited = true,
+                      @@edgeSet += e; 
+
+    // Case 3: Same non-trivial infection case
+    Cases = select t from Infected:s-(BELONGS_TO_CASE:e)-InfectionCase:t
+            where t.id NOT IN ("etc", "contact with patient", "overseas inflow")
+              and t.@visited == false
+            accum t.@visited = true,
+                  @@edgeSet += e;
+
+    SameCases = select t from Cases:s-(BELONGS_TO_CASE:e)-Patient:t
+                where t.@visited == false 
+                accum t.@visited = true,
+                      @@edgeSet += e; 
+  
+    Infected = People UNION SamePlace UNION SameCases;
+
+    AllVertexes = AllVertexes UNION Infected UNION Places UNION Cases;
+  end;
+  
+  //print AllVertexes[AllVertexes.@score];
+  //print @@edgeSet;
+
+  // --------------
+  // Part 2: Find the shortest product path from S to T
+  // Adapted from Single-source Weighted Shortest Path Algorithm
+
+  start (any) = {S};
+  start = SELECT s 
+          FROM start:s
+          POST-ACCUM s.@min_path_heap = min_tup(0, 1, s);
+
+  WHILE start.size() != 0 DO
+      Infected = SELECT t
+        FROM start:s-(reverse_INFECTED_BY>:e)-:t
+        WHERE e IN @@edgeSet
+        ACCUM 
+          t.@or_is_candidate = FALSE,
+          t.@min_path_heap += min_tup(s.@min_path_heap.top().cost + infected_by_weight, 
+          s.@min_path_heap.top().length + 1, s)
+        POST-ACCUM
+          IF abs(t.@min_prev_min_path - t.@min_path_heap.top().cost) > epsilon THEN
+              t.@or_is_candidate = TRUE,
+              t.@min_prev_min_path = t.@min_path_heap.top().cost
+          END
+        HAVING t.@or_is_candidate;
+
+      CloseContact = SELECT t
+        FROM start:s-(PATIENT_TRAVELED:e)-:t
+        WHERE e IN @@edgeSet
+        ACCUM 
+          t.@or_is_candidate = FALSE,
+          t.@min_path_heap += min_tup(s.@min_path_heap.top().cost + close_contact_weight, 
+          s.@min_path_heap.top().length + 1, s)
+        POST-ACCUM
+          IF abs(t.@min_prev_min_path - t.@min_path_heap.top().cost) > epsilon THEN
+              t.@or_is_candidate = TRUE,
+              t.@min_prev_min_path = t.@min_path_heap.top().cost
+          END
+        HAVING t.@or_is_candidate;
+
+      Cases = SELECT t
+        FROM start:s-(BELONGS_TO_CASE:e)-InfectionCase:t
+        WHERE e IN @@edgeSet
+          AND t.id NOT IN ("etc", "contact with patient", "overseas inflow")
+        ACCUM 
+          t.@or_is_candidate = FALSE,
+          t.@min_path_heap += min_tup(s.@min_path_heap.top().cost + same_case_weight, 
+          s.@min_path_heap.top().length + 1, s)
+        POST-ACCUM
+          IF abs(t.@min_prev_min_path - t.@min_path_heap.top().cost) > epsilon THEN
+              t.@or_is_candidate = TRUE,
+              t.@min_prev_min_path = t.@min_path_heap.top().cost
+          END
+        HAVING t.@or_is_candidate;
+
+      SameCase = SELECT t
+        FROM start:s-(BELONGS_TO_CASE:e)-Patient:t
+        WHERE e IN @@edgeSet
+        ACCUM 
+          t.@or_is_candidate = FALSE,
+          t.@min_path_heap += min_tup(s.@min_path_heap.top().cost + same_case_weight, 
+          s.@min_path_heap.top().length + 1, s)
+        POST-ACCUM
+          IF abs(t.@min_prev_min_path - t.@min_path_heap.top().cost) > epsilon THEN
+              t.@or_is_candidate = TRUE,
+              t.@min_prev_min_path = t.@min_path_heap.top().cost
+          END
+        HAVING t.@or_is_candidate;
+
+      start = Infected UNION CloseContact UNION Cases UNION SameCase;
+  END;
+
+  OrAccum @@or_is_T_present = FALSE;
+  AllVertexes = SELECT s 
+                FROM AllVertexes:s
+                POST-ACCUM 
+                  s.@score = exp(-s.@min_path_heap.top().cost),
+                  IF s == T THEN @@or_is_T_present += TRUE END;
+
+  // We can stop here and output all shortest distances from S
+  // print AllVertexes[AllVertexes.@score];
+  // print @@edgeSet;
+  
+  IF @@or_is_T_present == false THEN
+    print "The two patients are not likely to be related";
+  ELSE
+    SetAccum<VERTEX> @@next_tmp_set, @@path_vertexes;
+    SetAccum<EDGE> @@path_edges;
+    cur (any) = {T};
+    WHILE cur.size() != 0 DO
+      cur = select t
+            from cur:s-(:e)-:t
+            accum
+              if s.@min_path_heap.top().pred == t then
+                @@path_vertexes += t,
+                @@path_edges += e
+              end,
+              if s.@min_path_heap.top().pred == t and t != S then 
+                @@next_tmp_set += t 
+              end;
+
+      cur = @@next_tmp_set;
+      @@next_tmp_set.clear();
+    END;
+
+    PathVertexes = select s from AllVertexes:s where s in @@path_vertexes;
+    EndPoint = {T};
+    PathVertexes = PathVertexes UNION EndPoint;
+    print PathVertexes[PathVertexes.@score];
+    print @@path_edges;
+  END;
+
+}

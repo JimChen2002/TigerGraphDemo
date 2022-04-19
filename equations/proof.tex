@@ -1,0 +1,82 @@
+\newcommand{\labname}{Homework 9}
+\documentclass[11pt]{article}
+\usepackage[left=1in, right=1in, top=1in, bottom=1in]{geometry}
+\usepackage{amsmath,amsfonts,amssymb}
+\usepackage{graphicx}
+\usepackage{fancyhdr}
+
+% TODO: CHANGE THESE
+\newcommand{\myname}{Yijun Chen}
+
+% LSTLISTINGS PACKAGE (for pseudocode) ======================================
+\usepackage{listings}
+
+\newdimen\zzsize
+\zzsize=11pt
+\newdimen\kwsize
+\kwsize=11pt
+
+\newcommand{\basicstyle}{\fontsize{\zzsize}{1.1\zzsize}\ttfamily}
+\newcommand{\keywordstyle}{\fontsize{\kwsize}{1.1\kwsize}\normalfont\bf}
+\newlength{\zzlstwidth}
+\settowidth{\zzlstwidth}{{\basicstyle~}}
+\newcommand{\lcm}{}
+
+\lstset{
+  xleftmargin=5.0ex,
+  basewidth=\zzlstwidth,
+  basicstyle=\basicstyle,
+  captionpos=b,
+  numbers=left, numberstyle=\small, numbersep=8pt,
+  keywordstyle=\keywordstyle,
+  keywords={signature,sig,structure,struct,function,fun,fn,case,of,type,datatype,let,val,fn,in,end,as,functor,alloc,if,then,else,while,with,and,start,do},
+  commentstyle=\rmfamily\slshape,
+  morecomment=[l]{\%},
+  lineskip={1.5pt},
+  columns=[l]fullflexible,
+  keepspaces=true,
+  mathescape=true,
+  escapeinside={@}{@},
+% NOTE: need TWO sets of braces around each definition below!
+  literate={requires}{{$\lcm\text{\keywordstyle \% requires}$}}6
+           {returns}{{$\lcm\text{\keywordstyle \% returns}$}}6
+           {=}{{$\lcm=$}}2
+           {(}{{$($}}2
+           {)}{{$)$}}2
+           {**}{{$\lcm\times$}}2
+%           {||}{{$\lcm\Vert$}}2
+           {|}{{$|$}}2
+           {=>}{{$\lcm\boldsymbol\Rightarrow$}}2
+           {->}{{$\lcm\rightarrow$}}2
+           {'a}{{$\alpha$}}1
+           {'b}{{$\beta$}}1
+}
+% END LSTLISTINGS PACKAGE ===================================================
+
+% header
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{Tigergraph Demo}
+\chead{\myname{}}
+\rhead{Page \thepage{} of \pageref{mylastpagelabel}}
+
+\newcommand{\myparagraph}[1]{\paragraph{#1}\mbox{}\\}
+
+% document starts
+\begin{document}
+
+Let $P = (P_1,P_2,...,P_n)$ and $Q = (Q_1,Q_2,...,Q_m)$ be two paths
+where $P_1,P_2,...,P_n$ and $Q_1,Q_2,...,Q_m$ are the edges of them.
+Then, P is shorter than Q if and only if
+\begin{align*}
+  \sum_{i=1}^n P_i.weight & < \sum_{j=1}^m Q_j.weight\\
+  \Leftrightarrow \sum_{i=1}^n -\ln(P_i.relevance) & < \sum_{j=1}^m -\ln(Q_j.relevance)\\
+  \Leftrightarrow \sum_{i=1}^n \ln(P_i.relevance) & > \sum_{j=1}^m \ln(Q_j.relevance)\\
+  \Leftrightarrow \ln(\prod_{i=1}^nP_i.relevance) & > \ln(\prod_{j=1}^m Q_j.relevance)\\
+  \Leftrightarrow \prod_{i=1}^nP_i.relevance & > \prod_{j=1}^m Q_j.relevance\\
+\end{align*}
+
+% This label is used in the header to keep track of the page count.
+\label{mylastpagelabel}
+
+\end{document}
